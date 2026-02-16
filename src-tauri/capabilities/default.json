@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Default capability set",
   "windows": ["main"],
-  "permissions": ["core:default", "global-shortcut:default"]
+  "permissions": [
+    "core:default",
+    "core:webview:deny-internal-toggle-devtools",
+    "global-shortcut:default"
+  ]
 }
