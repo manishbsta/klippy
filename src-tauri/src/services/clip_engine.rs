@@ -32,21 +32,13 @@ impl ClipEngine {
 
     pub fn process_clip(&self, content: String) -> AppResult<Option<Clip>> {
         let settings = self.db.get_settings()?;
-        if settings.tracking_paused {
-            return Ok(None);
-        }
-
         if should_skip_content(&content, settings.max_clip_bytes) {
             return Ok(None);
         }
 
         let app_bundle_id = self.app.config().identifier.as_str();
         if let Some(bundle_id) = self.clipboard.active_bundle_id() {
-            if should_ignore_bundle(
-                &bundle_id,
-                app_bundle_id,
-                &settings.denylist_bundle_ids,
-            ) {
+            if should_ignore_bundle(&bundle_id, app_bundle_id, &settings.denylist_bundle_ids) {
                 return Ok(None);
             }
         }
@@ -121,7 +113,10 @@ mod tests {
 
     #[test]
     fn classifies_code() {
-        assert_eq!(classify_content_type("fn main() { println!(\"x\"); }"), "code");
+        assert_eq!(
+            classify_content_type("fn main() { println!(\"x\"); }"),
+            "code"
+        );
     }
 
     #[test]

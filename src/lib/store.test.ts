@@ -8,9 +8,6 @@ const mocks = vi.hoisted(() => {
     setPinned: vi.fn(),
     deleteClip: vi.fn(),
     clearAllClips: vi.fn(),
-    getSettings: vi.fn(),
-    updateSettings: vi.fn(),
-    setTrackingPaused: vi.fn(),
     stopApp: vi.fn(),
   };
 });
@@ -21,22 +18,12 @@ vi.mock('./api', () => ({
   setPinned: mocks.setPinned,
   deleteClip: mocks.deleteClip,
   clearAllClips: mocks.clearAllClips,
-  getSettings: mocks.getSettings,
-  updateSettings: mocks.updateSettings,
-  setTrackingPaused: mocks.setTrackingPaused,
   stopApp: mocks.stopApp,
 }));
 
 describe('useClipStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getSettings.mockResolvedValue({
-      historyLimit: 200,
-      trackingPaused: false,
-      maxClipBytes: 262144,
-      restoreClipboardAfterPaste: true,
-      denylistBundleIds: [],
-    });
     mocks.clearAllClips.mockResolvedValue(2);
     mocks.listClips.mockResolvedValue({
       items: [
@@ -60,23 +47,22 @@ describe('useClipStore', () => {
     });
   });
 
-  it('loads settings and clips', async () => {
+  it('loads clips', async () => {
     const store = useClipStore();
     await store.init();
 
-    expect(mocks.getSettings).toHaveBeenCalledTimes(1);
     expect(mocks.listClips).toHaveBeenCalledTimes(1);
     expect(store.items().length).toBe(2);
   });
 
-  it('copies selected item on Enter key', async () => {
+  it('does not copy item on Enter key', async () => {
     const store = useClipStore();
     await store.init();
 
     const event = new KeyboardEvent('keydown', { key: 'Enter' });
     await store.onKeyDown(event);
 
-    expect(mocks.copyClip).toHaveBeenCalledWith(1);
+    expect(mocks.copyClip).not.toHaveBeenCalled();
   });
 
   it('navigates with arrow keys', async () => {

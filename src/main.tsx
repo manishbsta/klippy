@@ -20,15 +20,11 @@ const Root = () => {
     const unlistenDeleted = await listen('clips://deleted', async () => {
       await store.reload();
     });
-    const unlistenTracking = await listen<{ paused: boolean }>('tracking://changed', (event) => {
-      store.setPaused(event.payload.paused);
-    });
 
     onCleanup(() => {
       unlistenCreated();
       unlistenUpdated();
       unlistenDeleted();
-      unlistenTracking();
     });
   });
 

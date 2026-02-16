@@ -3,14 +3,11 @@ import {
   clearAllClips,
   copyClip,
   deleteClip,
-  getSettings,
   listClips,
   setPinned,
-  setTrackingPaused,
   stopApp,
-  updateSettings,
 } from './api';
-import type { Clip, Settings } from './types';
+import type { Clip } from './types';
 
 const PAGE_SIZE = 100;
 
@@ -19,7 +16,6 @@ export interface ClipStore {
   loading: () => boolean;
   query: () => string;
   selectedIndex: () => number;
-  paused: () => boolean;
   init: () => Promise<void>;
   reload: () => Promise<void>;
   setQuery: (value: string) => void;
@@ -29,9 +25,7 @@ export interface ClipStore {
   pin: (id: number, pinned: boolean) => Promise<void>;
   remove: (id: number) => Promise<void>;
   clearAll: () => Promise<void>;
-  togglePaused: () => Promise<void>;
   stop: () => Promise<void>;
-  setPaused: (paused: boolean) => void;
 }
 
 export const useClipStore = (): ClipStore => {
@@ -39,8 +33,6 @@ export const useClipStore = (): ClipStore => {
   const [loading, setLoading] = createSignal(true);
   const [query, setQuery] = createSignal('');
   const [selectedIndex, setSelectedIndex] = createSignal(0);
-  const [settings, setSettings] = createSignal<Settings | null>(null);
-  const [paused, setPaused] = createSignal(false);
   let debounceTimer: number | undefined;
 
   const reload = async () => {
@@ -60,9 +52,6 @@ export const useClipStore = (): ClipStore => {
   };
 
   const init = async () => {
-    const currentSettings = await getSettings();
-    setSettings(currentSettings);
-    setPaused(currentSettings.trackingPaused);
     await reload();
   };
 
@@ -83,14 +72,6 @@ export const useClipStore = (): ClipStore => {
   const clearAll = async () => {
     await clearAllClips();
     await reload();
-  };
-
-  const togglePaused = async () => {
-    const next = !paused();
-    await setTrackingPaused(next);
-    const updated = await updateSettings({ trackingPaused: next });
-    setSettings(updated);
-    setPaused(next);
   };
 
   const stop = async () => {
@@ -128,15 +109,7 @@ export const useClipStore = (): ClipStore => {
       return;
     }
 
-    const active = currentItems[selectedIndex()];
-    if (!active) {
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      await copy(active.id);
-    }
+    // Enter-to-copy disabled by product requirement.
   };
 
   return {
@@ -144,7 +117,6 @@ export const useClipStore = (): ClipStore => {
     loading,
     query,
     selectedIndex,
-    paused,
     init,
     reload,
     setQuery: setQueryDebounced,
@@ -154,8 +126,6 @@ export const useClipStore = (): ClipStore => {
     pin,
     remove,
     clearAll,
-    togglePaused,
     stop,
-    setPaused,
   };
 };

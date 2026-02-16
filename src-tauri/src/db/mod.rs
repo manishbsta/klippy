@@ -62,16 +62,6 @@ pub struct Settings {
     pub denylist_bundle_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SettingsPatch {
-    pub history_limit: Option<i64>,
-    pub tracking_paused: Option<bool>,
-    pub max_clip_bytes: Option<i64>,
-    pub restore_clipboard_after_paste: Option<bool>,
-    pub denylist_bundle_ids: Option<Vec<String>>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LatestClip {
     pub content: String,
@@ -250,7 +240,9 @@ impl Database {
 
     pub fn get_clip(&self, id: i64) -> Result<Option<Clip>, DbError> {
         let conn = self.conn()?;
-        self.get_clip_internal(&conn, id).optional().map_err(DbError::from)
+        self.get_clip_internal(&conn, id)
+            .optional()
+            .map_err(DbError::from)
     }
 
     fn get_clip_internal(&self, conn: &Connection, id: i64) -> Result<Clip, rusqlite::Error> {
@@ -275,7 +267,9 @@ impl Database {
             "UPDATE clips SET pinned = ?1 WHERE id = ?2",
             params![if pinned { 1 } else { 0 }, id],
         )?;
-        self.get_clip_internal(&conn, id).optional().map_err(DbError::from)
+        self.get_clip_internal(&conn, id)
+            .optional()
+            .map_err(DbError::from)
     }
 
     pub fn delete_clip(&self, id: i64) -> Result<bool, DbError> {
@@ -307,55 +301,9 @@ impl Database {
             tracking_paused: row.1 == 1,
             max_clip_bytes: row.2,
             restore_clipboard_after_paste: row.3 == 1,
-            denylist_bundle_ids: serde_json::from_str(&row.4).unwrap_or_else(|_| default_denylist()),
+            denylist_bundle_ids: serde_json::from_str(&row.4)
+                .unwrap_or_else(|_| default_denylist()),
         })
-    }
-
-    pub fn update_settings(&self, patch: SettingsPatch) -> Result<Settings, DbError> {
-        let current = self.get_settings()?;
-        let next = Settings {
-            history_limit: patch.history_limit.unwrap_or(current.history_limit).max(1),
-            tracking_paused: patch.tracking_paused.unwrap_or(current.tracking_paused),
-            max_clip_bytes: patch.max_clip_bytes.unwrap_or(current.max_clip_bytes).max(1),
-            restore_clipboard_after_paste: patch
-                .restore_clipboard_after_paste
-                .unwrap_or(current.restore_clipboard_after_paste),
-            denylist_bundle_ids: patch
-                .denylist_bundle_ids
-                .unwrap_or(current.denylist_bundle_ids),
-        };
-
-        let denylist = serde_json::to_string(&next.denylist_bundle_ids)?;
-        let conn = self.conn()?;
-        conn.execute(
-            "
-            UPDATE settings SET
-              history_limit = ?1,
-              tracking_paused = ?2,
-              max_clip_bytes = ?3,
-              restore_clipboard_after_paste = ?4,
-              denylist_bundle_ids = ?5
-            WHERE id = 1
-            ",
-            params![
-                next.history_limit,
-                if next.tracking_paused { 1 } else { 0 },
-                next.max_clip_bytes,
-                if next.restore_clipboard_after_paste { 1 } else { 0 },
-                denylist
-            ],
-        )?;
-
-        Ok(next)
-    }
-
-    pub fn set_tracking_paused(&self, paused: bool) -> Result<(), DbError> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE settings SET tracking_paused = ?1 WHERE id = 1",
-            params![if paused { 1 } else { 0 }],
-        )?;
-        Ok(())
     }
 
     pub fn prune_excess(&self, history_limit: i64) -> Result<usize, DbError> {
@@ -414,25 +362,5 @@ mod tests {
         let page = db.list_clips(None, 10, 0).expect("list");
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id, pinned.id);
-    }
-
-    #[test]
-    fn settings_patch_applies() {
-        let db = Database::new_in_memory().expect("db init");
-        let updated = db
-            .update_settings(SettingsPatch {
-                history_limit: Some(300),
-                tracking_paused: Some(true),
-                max_clip_bytes: Some(1000),
-                restore_clipboard_after_paste: Some(false),
-                denylist_bundle_ids: Some(vec!["com.example".to_string()]),
-            })
-            .expect("update settings");
-
-        assert_eq!(updated.history_limit, 300);
-        assert!(updated.tracking_paused);
-        assert_eq!(updated.max_clip_bytes, 1000);
-        assert!(!updated.restore_clipboard_after_paste);
-        assert_eq!(updated.denylist_bundle_ids, vec!["com.example".to_string()]);
     }
 }

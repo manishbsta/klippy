@@ -6,7 +6,7 @@ export const SearchBox = (props: {
   <div class="relative">
     <input
       autofocus
-      class="w-full rounded-xl border border-slate-300/70 bg-white px-4 py-3 pr-10 text-[18px] font-medium text-slate-900 outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-cyan-500 focus:shadow-[0_0_0_4px_rgba(14,165,233,0.15)]"
+      class="w-full rounded-xl border border-slate-300/70 bg-white px-4 py-2.5 pr-10 text-[16px] font-medium text-slate-900 outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-cyan-500 focus:shadow-[0_0_0_4px_rgba(14,165,233,0.15)]"
       placeholder="Search clips..."
       value={props.query}
       onInput={(event) => props.onInput(event.currentTarget.value)}

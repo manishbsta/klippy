@@ -8,22 +8,6 @@ export interface Clip {
   createdAt: string;
 }
 
-export interface Settings {
-  historyLimit: number;
-  trackingPaused: boolean;
-  maxClipBytes: number;
-  restoreClipboardAfterPaste: boolean;
-  denylistBundleIds: string[];
-}
-
-export interface SettingsPatch {
-  historyLimit?: number;
-  trackingPaused?: boolean;
-  maxClipBytes?: number;
-  restoreClipboardAfterPaste?: boolean;
-  denylistBundleIds?: string[];
-}
-
 export interface ClipPage {
   items: Clip[];
   total: number;

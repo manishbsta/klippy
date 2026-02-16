@@ -1,4 +1,4 @@
-import { Show, createEffect } from 'solid-js';
+import { Show } from 'solid-js';
 import type { ClipStore } from './lib/store';
 import { SearchBox } from './components/SearchBox';
 import { ClipList } from './components/ClipList';
@@ -6,14 +6,9 @@ import { EmptyState } from './components/EmptyState';
 import klippyIcon from './assets/klippy-icon.png';
 
 export const App = (props: { store: ClipStore }) => {
-  createEffect(() => {
-    props.store.query();
-    props.store.selectedIndex();
-  });
-
   return (
-    <main class="min-h-screen bg-[radial-gradient(circle_at_15%_0%,_#bae6fd,_transparent_45%),radial-gradient(circle_at_85%_100%,_#ddd6fe,_transparent_40%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] p-3 font-sans text-slate-900">
-      <section class="mx-auto flex h-[560px] max-w-[620px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/70 shadow-[0_24px_80px_rgba(15,23,42,0.22)] backdrop-blur-xl">
+    <main class="h-screen bg-[radial-gradient(circle_at_15%_0%,_#bae6fd,_transparent_45%),radial-gradient(circle_at_85%_100%,_#ddd6fe,_transparent_40%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] p-3 font-sans text-slate-900">
+      <section class="mx-auto flex h-[calc(100vh-1.5rem)] max-w-[620px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/70 shadow-[0_24px_80px_rgba(15,23,42,0.22)] backdrop-blur-xl">
         <header class="border-b border-slate-200/80 bg-[linear-gradient(120deg,rgba(255,255,255,0.95),rgba(241,245,249,0.92))] px-4 py-3">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div class="flex items-center gap-3">
@@ -21,12 +16,12 @@ export const App = (props: { store: ClipStore }) => {
                 <img alt="Klippy icon" class="h-8 w-8 rounded-md" src={klippyIcon} />
               </div>
               <div>
-              <p class="mt-0.5 text-xs text-slate-500">Clipboard archive for text, URLs, and code.</p>
+              <p class="mt-0.5 text-[11px] text-slate-500">Clipboard archive for text, URLs, and code.</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <button
-                class="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 transition hover:-translate-y-[1px] hover:border-amber-500"
+                class="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-[13px] font-medium text-amber-700 transition hover:-translate-y-[1px] hover:border-amber-500"
                 onClick={() => {
                   void props.store.clearAll();
                 }}
@@ -36,14 +31,7 @@ export const App = (props: { store: ClipStore }) => {
                 Clear All
               </button>
               <button
-                class="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition hover:-translate-y-[1px] hover:border-slate-500 hover:text-slate-900"
-                onClick={() => props.store.togglePaused()}
-                type="button"
-              >
-                {props.store.paused() ? 'Resume' : 'Pause'}
-              </button>
-              <button
-                class="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:-translate-y-[1px] hover:border-rose-500"
+                class="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-[13px] font-medium text-rose-700 transition hover:-translate-y-[1px] hover:border-rose-500"
                 onClick={() => {
                   void props.store.stop();
                 }}
@@ -66,7 +54,7 @@ export const App = (props: { store: ClipStore }) => {
         >
           <Show
             when={props.store.items().length > 0}
-            fallback={<EmptyState paused={props.store.paused()} onResume={() => props.store.togglePaused()} />}
+            fallback={<EmptyState />}
           >
             <ClipList
               items={props.store.items()}
@@ -79,9 +67,8 @@ export const App = (props: { store: ClipStore }) => {
           </Show>
         </Show>
 
-        <footer class="mt-auto border-t border-slate-200/80 bg-white/60 px-4 py-2 text-xs text-slate-500">
+        <footer class="mt-auto border-t border-slate-200/80 bg-white/60 px-4 py-2 text-[11px] text-slate-500">
           <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px]">↑↓</span> navigate ·{' '}
-          <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px]">Enter</span> copy ·{' '}
           <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px]">⌘⇧V</span> show/hide
         </footer>
       </section>

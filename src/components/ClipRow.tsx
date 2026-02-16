@@ -53,7 +53,7 @@ export const ClipRow = (props: {
 
   return (
     <article
-      class={`group relative h-[168px] overflow-hidden rounded-xl border p-3 transition-all duration-200 ${
+      class={`group relative h-[168px] cursor-pointer overflow-hidden rounded-xl border p-3 transition-all duration-200 ${
         props.selected
           ? 'border-emerald-500/60 bg-white shadow-[0_12px_28px_rgba(16,24,40,0.12)]'
           : 'border-slate-200/80 bg-white/75 hover:-translate-y-[1px] hover:border-slate-300 hover:bg-white hover:shadow-[0_8px_24px_rgba(16,24,40,0.10)]'
@@ -82,7 +82,7 @@ export const ClipRow = (props: {
 
       <div class="h-full pb-12 pt-8">
         <p
-          class={`clip-five-lines block w-full pr-2 text-left text-[15px] leading-[1.55] transition-colors hover:text-black ${contentClassByType(props.clip.contentType)}`}
+          class={`clip-five-lines block w-full pr-2 text-left text-[14px] leading-[1.5] transition-colors hover:text-black ${contentClassByType(props.clip.contentType)}`}
         >
           {props.clip.content}
         </p>

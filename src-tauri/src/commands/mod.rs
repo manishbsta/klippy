@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::db::{ClipPage, Settings, SettingsPatch};
+use crate::db::ClipPage;
 use crate::services::clip_engine::ClipEngine;
 
 pub struct AppState {
@@ -13,11 +13,6 @@ pub struct AppState {
 #[derive(Clone, Debug, Serialize)]
 struct DeletedPayload {
     id: i64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct TrackingPayload {
-    paused: bool,
 }
 
 #[tauri::command]
@@ -85,53 +80,6 @@ pub fn clear_all_clips(app: AppHandle, state: State<'_, AppState>) -> Result<usi
         .map_err(|err| err.to_string())?;
     let _ = app.emit("clips://updated", true);
     Ok(deleted)
-}
-
-#[tauri::command]
-pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
-    state
-        .engine
-        .db()
-        .get_settings()
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub fn update_settings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    patch: SettingsPatch,
-) -> Result<Settings, String> {
-    let settings = state
-        .engine
-        .db()
-        .update_settings(patch)
-        .map_err(|err| err.to_string())?;
-
-    let _ = app.emit(
-        "tracking://changed",
-        TrackingPayload {
-            paused: settings.tracking_paused,
-        },
-    );
-
-    Ok(settings)
-}
-
-#[tauri::command]
-pub fn set_tracking_paused(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    paused: bool,
-) -> Result<(), String> {
-    state
-        .engine
-        .db()
-        .set_tracking_paused(paused)
-        .map_err(|err| err.to_string())?;
-
-    let _ = app.emit("tracking://changed", TrackingPayload { paused });
-    Ok(())
 }
 
 #[tauri::command]

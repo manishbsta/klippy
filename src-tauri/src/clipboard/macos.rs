@@ -23,7 +23,9 @@ impl MacOsClipboard {
     fn get_via_pbpaste() -> Result<String, ClipboardError> {
         let output = Command::new("pbpaste").output()?;
         if !output.status.success() {
-            return Err(ClipboardError::Command("pbpaste exited unsuccessfully".to_string()));
+            return Err(ClipboardError::Command(
+                "pbpaste exited unsuccessfully".to_string(),
+            ));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -32,7 +34,9 @@ impl MacOsClipboard {
     fn run_osascript(script: &str) -> Result<String, ClipboardError> {
         let output = Command::new("osascript").arg("-e").arg(script).output()?;
         if !output.status.success() {
-            return Err(ClipboardError::Command("osascript exited unsuccessfully".to_string()));
+            return Err(ClipboardError::Command(
+                "osascript exited unsuccessfully".to_string(),
+            ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
@@ -51,7 +55,9 @@ impl ClipboardService for MacOsClipboard {
 
         let status = child.wait()?;
         if !status.success() {
-            return Err(ClipboardError::Command("pbcopy exited unsuccessfully".to_string()));
+            return Err(ClipboardError::Command(
+                "pbcopy exited unsuccessfully".to_string(),
+            ));
         }
 
         Ok(())
@@ -78,6 +84,8 @@ impl ClipboardService for MacOsClipboard {
 
     fn active_bundle_id(&self) -> Option<String> {
         let script = "tell application \"System Events\" to get bundle identifier of first process whose frontmost is true";
-        Self::run_osascript(script).ok().filter(|bundle| !bundle.is_empty())
+        Self::run_osascript(script)
+            .ok()
+            .filter(|bundle| !bundle.is_empty())
     }
 }
