@@ -6,22 +6,64 @@ mod services;
 mod utils;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use commands::AppState;
 use services::clip_engine::ClipEngine;
-use tauri::{LogicalSize, Manager, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::level_filters::LevelFilter;
 use tracing::warn;
 
-fn toggle_window(window: &WebviewWindow) {
+#[derive(Default)]
+struct WindowPlacementState {
+    user_has_moved: AtomicBool,
+    suppress_next_move_event: AtomicBool,
+}
+
+fn place_window_top_right(window: &WebviewWindow, placement: &WindowPlacementState) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    let Some(monitor) = monitor else {
+        return;
+    };
+
+    let scale = monitor.scale_factor().max(1.0);
+    let monitor_pos_x = monitor.position().x as f64 / scale;
+    let monitor_pos_y = monitor.position().y as f64 / scale;
+    let monitor_width = monitor.size().width as f64 / scale;
+    let window_width = window
+        .outer_size()
+        .map(|size| size.width as f64 / scale)
+        .unwrap_or(600.0);
+    let margin = 14.0;
+
+    let x = monitor_pos_x + monitor_width - window_width - margin;
+    let y = monitor_pos_y + margin;
+
+    placement
+        .suppress_next_move_event
+        .store(true, Ordering::SeqCst);
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
+fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     let is_visible: bool = window.is_visible().unwrap_or_default();
     let is_minimized: bool = window.is_minimized().unwrap_or_default();
 
     if is_visible && !is_minimized {
         let _ = window.minimize();
         return;
+    }
+
+    let placement = app.state::<WindowPlacementState>();
+    if !placement.user_has_moved.load(Ordering::SeqCst) {
+        place_window_top_right(window, placement.inner());
     }
 
     let _ = window.unminimize();
@@ -48,7 +90,7 @@ pub fn run() {
                         return;
                     }
                     if let Some(window) = app.get_webview_window("main") {
-                        toggle_window(&window);
+                        toggle_window(app, &window);
                     }
                 })
                 .build(),
@@ -56,6 +98,8 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+            app.manage(WindowPlacementState::default());
 
             if let Some(window) = app.get_webview_window("main") {
                 let monitor = window
@@ -81,6 +125,9 @@ pub fn run() {
                         }
                     }
                 }
+
+                let placement = app.state::<WindowPlacementState>();
+                place_window_top_right(&window, placement.inner());
             }
 
             let app_data_dir = app
@@ -120,7 +167,8 @@ pub fn run() {
                         } = event
                         {
                             if let Some(window) = tray.app_handle().get_webview_window("main") {
-                                toggle_window(&window);
+                                let app_handle = tray.app_handle();
+                                toggle_window(&app_handle, &window);
                             }
                         }
                     })
@@ -135,9 +183,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.minimize();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.minimize();
+                }
+                WindowEvent::Moved(_) => {
+                    let placement = window.app_handle().state::<WindowPlacementState>();
+                    if placement
+                        .suppress_next_move_event
+                        .swap(false, Ordering::SeqCst)
+                    {
+                        return;
+                    }
+                    placement.user_has_moved.store(true, Ordering::SeqCst);
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
