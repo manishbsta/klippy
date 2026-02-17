@@ -10,7 +10,7 @@ export const ClipList = (props: {
   onPin: (id: number, pinned: boolean) => Promise<void> | void;
   onDelete: (id: number) => Promise<void> | void;
 }) => (
-  <div class="grid flex-1 gap-2 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.65),rgba(248,250,252,0.75))] p-3">
+  <div class="flex flex-1 flex-col gap-1 overflow-y-auto bg-slate-100/60 p-1.5">
     <For each={props.items}>
       {(clip, idx) => (
         <ClipRow

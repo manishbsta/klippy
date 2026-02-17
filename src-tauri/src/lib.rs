@@ -56,7 +56,7 @@ fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     let is_visible: bool = window.is_visible().unwrap_or_default();
     let is_minimized: bool = window.is_minimized().unwrap_or_default();
 
-    if is_visible && !is_minimized {
+    if should_minimize_on_focus_loss(is_visible, is_minimized) {
         let _ = window.minimize();
         return;
     }
@@ -69,6 +69,10 @@ fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+fn should_minimize_on_focus_loss(is_visible: bool, is_minimized: bool) -> bool {
+    is_visible && !is_minimized
 }
 
 pub fn run() {
@@ -111,7 +115,7 @@ pub fn run() {
                     let scale = window.scale_factor().unwrap_or(1.0);
                     let monitor_width = (monitor.size().width as f64 / scale).max(1.0);
                     let monitor_height = (monitor.size().height as f64 / scale).max(1.0);
-                    let min_width = (monitor_width * 0.30).round().max(520.0).min(620.0);
+                    let min_width = (monitor_width * 0.30).round().clamp(520.0, 620.0);
                     let min_height = (monitor_height * 0.80).round();
                     let _ = window.set_min_size(Some(LogicalSize::new(min_width, min_height)));
 
@@ -168,7 +172,7 @@ pub fn run() {
                         {
                             if let Some(window) = tray.app_handle().get_webview_window("main") {
                                 let app_handle = tray.app_handle();
-                                toggle_window(&app_handle, &window);
+                                toggle_window(app_handle, &window);
                             }
                         }
                     })
@@ -187,6 +191,13 @@ pub fn run() {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.minimize();
+                }
+                WindowEvent::Focused(false) => {
+                    let is_visible: bool = window.is_visible().unwrap_or_default();
+                    let is_minimized: bool = window.is_minimized().unwrap_or_default();
+                    if should_minimize_on_focus_loss(is_visible, is_minimized) {
+                        let _ = window.minimize();
+                    }
                 }
                 WindowEvent::Moved(_) => {
                     let placement = window.app_handle().state::<WindowPlacementState>();
@@ -212,5 +223,18 @@ pub fn run() {
 
     if let Err(err) = app_builder.run(tauri::generate_context!()) {
         eprintln!("error while running tauri application: {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_minimize_on_focus_loss;
+
+    #[test]
+    fn minimizes_only_when_window_is_visible_and_not_minimized() {
+        assert!(should_minimize_on_focus_loss(true, false));
+        assert!(!should_minimize_on_focus_loss(false, false));
+        assert!(!should_minimize_on_focus_loss(true, true));
+        assert!(!should_minimize_on_focus_loss(false, true));
     }
 }

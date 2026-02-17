@@ -15,6 +15,7 @@ It watches clipboard text changes, stores them locally, and gives you a fast sea
 - Delete single clip or `Clear All`.
 - Auto-pruning with pinned protection.
 - Starts at login (autostart enabled).
+- Auto-minimizes when focus moves to another app.
 - Close button minimizes to background (does not quit).
 - Local-only storage in SQLite (WAL mode).
 - Clipboard content from Klippy itself is ignored.
@@ -79,6 +80,22 @@ Common output paths:
 
 - App bundle: `src-tauri/target/release/bundle/macos/Klippy.app`
 - Other bundles (for example DMG/PKG): `src-tauri/target/release/bundle/`
+
+## Memory Measurement (Release)
+
+Target for optimization: **Klippy main process idle memory <= 45 MB**.
+
+Measure in release mode only:
+
+1. Build release with `bun run tauri:build`.
+2. Launch `Klippy.app` from `/Applications` (or the release bundle output).
+3. Let it idle for ~30 seconds with the window hidden/minimized.
+4. Check Activity Monitor and measure the `Klippy` main process.
+
+Notes:
+
+- `tauri dev` (`tauri://localhost`) includes development overhead and is not the memory optimization target.
+- WebKit helper processes may appear separately; use the main `Klippy` process for this baseline target.
 
 ## Install on macOS
 

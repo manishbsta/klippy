@@ -7,21 +7,21 @@ import klippyIcon from './assets/klippy-icon.png';
 
 export const App = (props: { store: ClipStore }) => {
   return (
-    <main class="h-screen bg-[radial-gradient(circle_at_15%_0%,_#bae6fd,_transparent_45%),radial-gradient(circle_at_85%_100%,_#ddd6fe,_transparent_40%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] p-3 font-sans text-slate-900">
-      <section class="mx-auto flex h-[calc(100vh-1.5rem)] max-w-[620px] flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/70 shadow-[0_24px_80px_rgba(15,23,42,0.22)] backdrop-blur-xl">
-        <header class="border-b border-slate-200/80 bg-[linear-gradient(120deg,rgba(255,255,255,0.95),rgba(241,245,249,0.92))] px-4 py-3">
+    <main class="h-screen bg-slate-100 p-3 text-slate-900">
+      <section class="mx-auto flex h-[calc(100vh-1.5rem)] max-w-[620px] flex-col overflow-hidden rounded-2xl border border-slate-300/80 bg-slate-50 shadow-[0_10px_28px_rgba(15,23,42,0.1)]">
+        <header class="border-b border-slate-300/70 bg-slate-50 px-4 py-3">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div class="flex items-center gap-3">
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200/70 bg-white shadow-[0_8px_18px_rgba(15,23,42,0.1)]">
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-300/70 bg-white shadow-[0_3px_10px_rgba(15,23,42,0.08)]">
                 <img alt="Klippy icon" class="h-8 w-8 rounded-md" src={klippyIcon} />
               </div>
               <div>
-              <p class="mt-0.5 text-[11px] text-slate-500">Clipboard archive for text, URLs, and code.</p>
+                <p class="mt-0.5 text-[11px] text-slate-500">Clipboard archive for text, URLs, and code.</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <button
-                class="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-[13px] font-medium text-amber-700 transition hover:-translate-y-[1px] hover:border-amber-500"
+                class="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-[13px] font-medium text-amber-700 transition hover:border-amber-500"
                 onClick={() => {
                   void props.store.clearAll();
                 }}
@@ -31,7 +31,7 @@ export const App = (props: { store: ClipStore }) => {
                 Clear All
               </button>
               <button
-                class="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-[13px] font-medium text-rose-700 transition hover:-translate-y-[1px] hover:border-rose-500"
+                class="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-[13px] font-medium text-rose-700 transition hover:border-rose-500"
                 onClick={() => {
                   void props.store.stop();
                 }}
@@ -67,7 +67,7 @@ export const App = (props: { store: ClipStore }) => {
           </Show>
         </Show>
 
-        <footer class="mt-auto border-t border-slate-200/80 bg-white/60 px-4 py-2 text-[11px] text-slate-500">
+        <footer class="mt-auto border-t border-slate-300/70 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
           <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px]">↑↓</span> navigate ·{' '}
           <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px]">⌘⇧V</span> show/hide
         </footer>

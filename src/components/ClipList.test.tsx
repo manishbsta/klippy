@@ -29,12 +29,18 @@ describe('ClipList', () => {
     ));
 
     expect(screen.getByText('hello world')).toBeInTheDocument();
+    const row = screen.getByTestId('clip-row-10');
+    const content = screen.getByTestId('clip-content-10');
+    expect(row.className).toContain('h-[74px]');
+    expect(content.className).toContain('clip-two-lines');
 
-    fireEvent.click(screen.getByText('Copy'));
-    fireEvent.click(screen.getByText('Pin'));
-    fireEvent.click(screen.getByText('Delete'));
-
+    fireEvent.click(row);
     expect(onCopy).toHaveBeenCalledWith(10);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin clip' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete clip' }));
+
+    expect(onCopy).toHaveBeenCalledTimes(1);
     expect(onPin).toHaveBeenCalledWith(10, true);
     expect(onDelete).toHaveBeenCalledWith(10);
   });

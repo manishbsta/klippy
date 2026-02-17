@@ -10,7 +10,7 @@
     "devUrl": "http://localhost:5173"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
@@ -21,7 +21,7 @@
         "maximizable": false,
         "minimizable": true,
         "visible": false,
-        "alwaysOnTop": true,
+        "alwaysOnTop": false,
         "decorations": true
       }
     ],
