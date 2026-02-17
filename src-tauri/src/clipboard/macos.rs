@@ -124,6 +124,14 @@ impl ClipboardService for MacOsClipboard {
             let debounce = Duration::from_millis(DEBOUNCE_MS);
             let mut clipboard = Self::clipboard().ok();
 
+            // Seed the baseline with current clipboard content so app launch
+            // does not re-ingest the last copied item immediately.
+            if let Some(handle) = clipboard.as_mut() {
+                if let Ok(Some(current)) = Self::read_payload(handle) {
+                    previous_signature = Some(Self::payload_signature(&current));
+                }
+            }
+
             loop {
                 if clipboard.is_none() {
                     clipboard = Self::clipboard().ok();
