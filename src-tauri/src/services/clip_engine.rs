@@ -1,35 +1,50 @@
+use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
-use tracing::error;
+use tracing::{error, warn};
 
-use crate::clipboard::ClipboardService;
-use crate::db::{Clip, Database, LatestClip};
+use crate::clipboard::{ClipboardPayload, ClipboardService, ImagePayload};
+use crate::db::{Clip, Database, ImageClipInsert, LatestClip};
 use crate::error::{AppError, AppResult};
+use crate::services::media_store::{MediaStore, StoredImage};
 use crate::services::prune::run_prune;
 use crate::utils::hash::sha256_hex;
 
 const INTERNAL_COPY_SUPPRESS_WINDOW: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone)]
+enum PendingInternalPayload {
+    Text(String),
+    ImageHash(String),
+}
+
+#[derive(Debug, Clone)]
 struct PendingInternalCopy {
-    content: String,
+    payload: PendingInternalPayload,
     created_at: Instant,
 }
 
 pub struct ClipEngine {
     db: Arc<Database>,
     clipboard: Arc<dyn ClipboardService>,
+    media_store: Arc<MediaStore>,
     app: AppHandle,
     pending_internal_copy: Mutex<Option<PendingInternalCopy>>,
 }
 
 impl ClipEngine {
-    pub fn new(db: Arc<Database>, clipboard: Arc<dyn ClipboardService>, app: AppHandle) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        clipboard: Arc<dyn ClipboardService>,
+        media_store: Arc<MediaStore>,
+        app: AppHandle,
+    ) -> Self {
         Self {
             db,
             clipboard,
+            media_store,
             app,
             pending_internal_copy: Mutex::new(None),
         }
@@ -37,21 +52,21 @@ impl ClipEngine {
 
     pub fn start(self: &Arc<Self>) -> AppResult<()> {
         let engine = Arc::clone(self);
-        self.clipboard.watch_changes(Arc::new(move |content| {
-            if let Err(err) = engine.process_clip(content) {
+        self.clipboard.watch_changes(Arc::new(move |payload| {
+            if let Err(err) = engine.process_payload(payload) {
                 error!("clipboard ingestion failed: {err}");
             }
         }))?;
         Ok(())
     }
 
-    pub fn process_clip(&self, content: String) -> AppResult<Option<Clip>> {
+    pub fn process_payload(&self, payload: ClipboardPayload) -> AppResult<Option<Clip>> {
         let settings = self.db.get_settings()?;
-        if should_skip_content(&content, settings.max_clip_bytes) {
+        if should_skip_payload(&payload, settings.max_clip_bytes) {
             return Ok(None);
         }
 
-        if self.should_skip_pending_internal_copy(&content)? {
+        if self.should_skip_pending_internal_copy(&payload)? {
             return Ok(None);
         }
 
@@ -62,31 +77,142 @@ impl ClipEngine {
             }
         }
 
-        let hash = sha256_hex(&content);
+        let hash = hash_for_payload(&payload)?;
         let latest = self.db.latest_clip()?;
-        if is_duplicate(latest.as_ref(), &content, &hash) {
+        if is_duplicate(latest.as_ref(), &payload, &hash) {
             return Ok(None);
         }
 
-        let content_type = classify_content_type(&content);
-        let clip = self.db.insert_clip(&content, content_type)?;
-        let _ = run_prune(&self.db, settings.history_limit)?;
-        let _ = self.app.emit("clips://created", clip.clone());
+        let clip = match payload {
+            ClipboardPayload::Text(content) => {
+                let content_type = classify_content_type(&content);
+                self.db.insert_text_clip(&content, content_type, &hash)?
+            }
+            ClipboardPayload::Image(image) => {
+                let stored = self.media_store.store_image(&image)?;
+                let summary = format_image_summary(&image, &stored);
+                self.db.insert_image_clip(ImageClipInsert {
+                    content: &summary,
+                    hash: &hash,
+                    media_path: &stored.media_path,
+                    thumb_path: &stored.thumb_path,
+                    mime_type: &stored.mime_type,
+                    byte_size: stored.byte_size,
+                    pixel_width: stored.pixel_width,
+                    pixel_height: stored.pixel_height,
+                })?
+            }
+        };
 
+        let pruned = run_prune(&self.db, settings.history_limit)?;
+        for pruned_clip in pruned {
+            if let Err(err) = self.cleanup_clip_media(&pruned_clip) {
+                warn!("failed to clean media for pruned clip {}: {err}", pruned_clip.id);
+            }
+        }
+
+        let _ = self.app.emit("clips://created", clip.clone());
         Ok(Some(clip))
     }
 
     pub fn copy_clip(&self, id: i64) -> AppResult<()> {
         let clip = self.db.get_clip(id)?.ok_or(AppError::NotFound)?;
-        self.clipboard.set_content(&clip.content)?;
+
+        let (clipboard_payload, pending_payload) = if clip.content_type == "image" {
+            let media_path = clip
+                .media_path
+                .as_ref()
+                .ok_or_else(|| AppError::Internal("image clip is missing media path".to_string()))?;
+            let bytes = fs::read(media_path).map_err(|err| AppError::Internal(err.to_string()))?;
+            let hash = MediaStore::canonical_hash_for_image_bytes(&bytes)?;
+            (
+                ClipboardPayload::Image(ImagePayload {
+                    bytes,
+                    mime: clip
+                        .mime_type
+                        .clone()
+                        .unwrap_or_else(|| "image/png".to_string()),
+                    format: format_from_mime(clip.mime_type.as_deref()),
+                    width: clip.pixel_width.unwrap_or_default() as u32,
+                    height: clip.pixel_height.unwrap_or_default() as u32,
+                }),
+                PendingInternalPayload::ImageHash(hash),
+            )
+        } else {
+            (
+                ClipboardPayload::Text(clip.content.clone()),
+                PendingInternalPayload::Text(clip.content),
+            )
+        };
+
+        self.clipboard.set_payload(&clipboard_payload)?;
+
         let mut pending = self
             .pending_internal_copy
             .lock()
             .map_err(|_| AppError::Internal("pending copy lock poisoned".to_string()))?;
         *pending = Some(PendingInternalCopy {
-            content: clip.content,
+            payload: pending_payload,
             created_at: Instant::now(),
         });
+        Ok(())
+    }
+
+    pub fn reconcile_recent_image_duplicates(&self, limit: i64) -> AppResult<usize> {
+        let images = self.db.list_image_clips_desc(limit)?;
+        if images.is_empty() {
+            return Ok(0);
+        }
+
+        let mut last_canonical_hash: Option<String> = None;
+        let mut duplicate_ids = Vec::new();
+
+        for clip in &images {
+            let Some(media_path) = clip.media_path.as_deref() else {
+                continue;
+            };
+
+            let canonical = match self.media_store.canonical_hash_from_path(media_path) {
+                Ok(value) => value,
+                Err(err) => {
+                    warn!("failed to canonicalize image clip {}: {err}", clip.id);
+                    continue;
+                }
+            };
+
+            if last_canonical_hash
+                .as_deref()
+                .map(|prev| prev == canonical)
+                .unwrap_or(false)
+            {
+                duplicate_ids.push(clip.id);
+                continue;
+            }
+
+            last_canonical_hash = Some(canonical);
+        }
+
+        if duplicate_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let deleted = self.db.delete_clips_by_ids(&duplicate_ids)?;
+        self.cleanup_media_for_clips(&deleted)?;
+        Ok(deleted.len())
+    }
+
+    pub fn cleanup_clip_media(&self, clip: &Clip) -> AppResult<()> {
+        if clip.content_type != "image" {
+            return Ok(());
+        }
+        self.media_store
+            .delete_files_for_clip(clip.media_path.as_deref(), clip.thumb_path.as_deref())
+    }
+
+    pub fn cleanup_media_for_clips(&self, clips: &[Clip]) -> AppResult<()> {
+        for clip in clips {
+            self.cleanup_clip_media(clip)?;
+        }
         Ok(())
     }
 
@@ -94,7 +220,7 @@ impl ClipEngine {
         &self.db
     }
 
-    fn should_skip_pending_internal_copy(&self, content: &str) -> AppResult<bool> {
+    fn should_skip_pending_internal_copy(&self, payload: &ClipboardPayload) -> AppResult<bool> {
         let mut pending = self
             .pending_internal_copy
             .lock()
@@ -103,7 +229,7 @@ impl ClipEngine {
 
         if should_skip_internal_copy(
             pending.as_ref(),
-            content,
+            payload,
             now,
             INTERNAL_COPY_SUPPRESS_WINDOW,
         ) {
@@ -123,32 +249,32 @@ impl ClipEngine {
     }
 }
 
-pub fn should_skip_content(content: &str, max_clip_bytes: i64) -> bool {
-    content.trim().is_empty() || content.len() as i64 > max_clip_bytes
+pub fn should_skip_payload(payload: &ClipboardPayload, max_clip_bytes: i64) -> bool {
+    match payload {
+        ClipboardPayload::Text(content) => {
+            content.trim().is_empty() || content.len() as i64 > max_clip_bytes
+        }
+        ClipboardPayload::Image(image) => {
+            image.bytes.is_empty() || image.bytes.len() as i64 > max_clip_bytes
+        }
+    }
 }
 
 pub fn should_ignore_bundle(bundle_id: &str, app_bundle_id: &str, denylist: &[String]) -> bool {
     bundle_id == app_bundle_id || denylist.iter().any(|item| item == bundle_id)
 }
 
-pub fn is_duplicate(latest: Option<&LatestClip>, content: &str, hash: &str) -> bool {
-    latest
-        .map(|entry| entry.content == content && entry.hash == hash)
-        .unwrap_or(false)
-}
-
-fn should_skip_internal_copy(
-    pending: Option<&PendingInternalCopy>,
-    incoming_content: &str,
-    now: Instant,
-    suppress_window: Duration,
-) -> bool {
-    pending
-        .map(|entry| {
-            now.duration_since(entry.created_at) <= suppress_window
-                && entry.content == incoming_content
-        })
-        .unwrap_or(false)
+pub fn is_duplicate(latest: Option<&LatestClip>, payload: &ClipboardPayload, hash: &str) -> bool {
+    match payload {
+        ClipboardPayload::Text(content) => latest
+            .map(|entry| {
+                entry.content_type != "image" && entry.content == *content && entry.hash == hash
+            })
+            .unwrap_or(false),
+        ClipboardPayload::Image(_) => latest
+            .map(|entry| entry.content_type == "image" && entry.hash == hash)
+            .unwrap_or(false),
+    }
 }
 
 pub fn classify_content_type(content: &str) -> &'static str {
@@ -158,7 +284,15 @@ pub fn classify_content_type(content: &str) -> &'static str {
     }
 
     let code_signals = [
-        "fn ", "const ", "let ", "class ", "import ", "#include", "public ", "private ", "=>",
+        "fn ",
+        "const ",
+        "let ",
+        "class ",
+        "import ",
+        "#include",
+        "public ",
+        "private ",
+        "=>",
     ];
     if content.contains('{')
         || content.contains('}')
@@ -171,9 +305,93 @@ pub fn classify_content_type(content: &str) -> &'static str {
     "text"
 }
 
+fn hash_for_payload(payload: &ClipboardPayload) -> AppResult<String> {
+    match payload {
+        ClipboardPayload::Text(content) => Ok(sha256_hex(content)),
+        ClipboardPayload::Image(image) => MediaStore::canonical_hash_for_image_bytes(&image.bytes),
+    }
+}
+
+fn should_skip_internal_copy(
+    pending: Option<&PendingInternalCopy>,
+    incoming_payload: &ClipboardPayload,
+    now: Instant,
+    suppress_window: Duration,
+) -> bool {
+    pending
+        .map(|entry| {
+            if now.duration_since(entry.created_at) > suppress_window {
+                return false;
+            }
+            match (&entry.payload, incoming_payload) {
+                (PendingInternalPayload::Text(existing), ClipboardPayload::Text(incoming)) => {
+                    existing == incoming
+                }
+                (
+                    PendingInternalPayload::ImageHash(existing_hash),
+                    ClipboardPayload::Image(incoming),
+                ) => MediaStore::canonical_hash_for_image_bytes(&incoming.bytes)
+                    .map(|incoming_hash| existing_hash == &incoming_hash)
+                    .unwrap_or(false),
+                _ => false,
+            }
+        })
+        .unwrap_or(false)
+}
+
+fn format_from_mime(mime: Option<&str>) -> String {
+    match mime.unwrap_or("image/png") {
+        "image/jpeg" => "jpeg".to_string(),
+        "image/tiff" => "tiff".to_string(),
+        "image/webp" => "webp".to_string(),
+        _ => "png".to_string(),
+    }
+}
+
+fn format_image_summary(image: &ImagePayload, stored: &StoredImage) -> String {
+    let size_mb = stored.byte_size as f64 / (1024.0 * 1024.0);
+    format!(
+        "Image | {} | {}x{} | {:.1} MB",
+        image.format.to_ascii_uppercase(),
+        stored.pixel_width,
+        stored.pixel_height,
+        size_mb
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use image::{DynamicImage, ImageFormat, RgbaImage};
+
     use super::*;
+
+    fn image_payload_with_len(len: usize) -> ClipboardPayload {
+        ClipboardPayload::Image(ImagePayload {
+            bytes: vec![1; len],
+            mime: "image/png".to_string(),
+            format: "png".to_string(),
+            width: 10,
+            height: 10,
+        })
+    }
+
+    fn encoded_image_payload(format: ImageFormat) -> ClipboardPayload {
+        let rgba =
+            RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).expect("image");
+        let mut output = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(rgba)
+            .write_to(&mut output, format)
+            .expect("encode");
+        ClipboardPayload::Image(ImagePayload {
+            bytes: output.into_inner(),
+            mime: "image/png".to_string(),
+            format: "png".to_string(),
+            width: 2,
+            height: 1,
+        })
+    }
 
     #[test]
     fn classifies_url() {
@@ -189,20 +407,62 @@ mod tests {
     }
 
     #[test]
-    fn skips_empty_and_oversized() {
-        assert!(should_skip_content("   ", 100));
-        assert!(should_skip_content(&"a".repeat(20), 10));
-        assert!(!should_skip_content("hello", 100));
+    fn skips_empty_and_oversized_text() {
+        assert!(should_skip_payload(&ClipboardPayload::Text("   ".to_string()), 100));
+        assert!(should_skip_payload(
+            &ClipboardPayload::Text("a".repeat(20)),
+            10
+        ));
+        assert!(!should_skip_payload(
+            &ClipboardPayload::Text("hello".to_string()),
+            100
+        ));
     }
 
     #[test]
-    fn duplicate_check_matches_latest() {
+    fn skips_oversized_image_payload() {
+        assert!(should_skip_payload(&image_payload_with_len(11), 10));
+        assert!(!should_skip_payload(&image_payload_with_len(10), 10));
+    }
+
+    #[test]
+    fn duplicate_check_matches_latest_text() {
         let latest = LatestClip {
             content: "hello".to_string(),
+            content_type: "text".to_string(),
             hash: "abc".to_string(),
         };
-        assert!(is_duplicate(Some(&latest), "hello", "abc"));
-        assert!(!is_duplicate(Some(&latest), "hello!", "abc"));
+        assert!(is_duplicate(
+            Some(&latest),
+            &ClipboardPayload::Text("hello".to_string()),
+            "abc"
+        ));
+        assert!(!is_duplicate(
+            Some(&latest),
+            &ClipboardPayload::Text("hello!".to_string()),
+            "abc"
+        ));
+    }
+
+    #[test]
+    fn duplicate_check_matches_latest_image_hash() {
+        let payload = encoded_image_payload(ImageFormat::Png);
+        let hash = hash_for_payload(&payload).expect("hash");
+        let latest = LatestClip {
+            content: "Image".to_string(),
+            content_type: "image".to_string(),
+            hash: hash.clone(),
+        };
+        assert!(is_duplicate(Some(&latest), &payload, &hash));
+    }
+
+    #[test]
+    fn canonical_image_hash_is_format_independent() {
+        let png_payload = encoded_image_payload(ImageFormat::Png);
+        let tiff_payload = encoded_image_payload(ImageFormat::Tiff);
+        let png_hash = hash_for_payload(&png_payload).expect("png hash");
+        let tiff_hash = hash_for_payload(&tiff_payload).expect("tiff hash");
+        assert_eq!(png_hash, tiff_hash);
     }
 
     #[test]
@@ -228,13 +488,13 @@ mod tests {
     #[test]
     fn skips_pending_internal_copy_within_suppress_window() {
         let pending = PendingInternalCopy {
-            content: "copy me".to_string(),
+            payload: PendingInternalPayload::Text("copy me".to_string()),
             created_at: Instant::now(),
         };
 
         assert!(should_skip_internal_copy(
             Some(&pending),
-            "copy me",
+            &ClipboardPayload::Text("copy me".to_string()),
             Instant::now(),
             Duration::from_secs(2)
         ));
@@ -243,13 +503,13 @@ mod tests {
     #[test]
     fn does_not_skip_pending_internal_copy_if_content_differs() {
         let pending = PendingInternalCopy {
-            content: "copy me".to_string(),
+            payload: PendingInternalPayload::Text("copy me".to_string()),
             created_at: Instant::now(),
         };
 
         assert!(!should_skip_internal_copy(
             Some(&pending),
-            "different",
+            &ClipboardPayload::Text("different".to_string()),
             Instant::now(),
             Duration::from_secs(2)
         ));
@@ -258,13 +518,29 @@ mod tests {
     #[test]
     fn does_not_skip_pending_internal_copy_after_window_expires() {
         let pending = PendingInternalCopy {
-            content: "copy me".to_string(),
+            payload: PendingInternalPayload::Text("copy me".to_string()),
             created_at: Instant::now() - Duration::from_secs(3),
         };
 
         assert!(!should_skip_internal_copy(
             Some(&pending),
-            "copy me",
+            &ClipboardPayload::Text("copy me".to_string()),
+            Instant::now(),
+            Duration::from_secs(2)
+        ));
+    }
+
+    #[test]
+    fn image_pending_copy_uses_hash_match() {
+        let payload = encoded_image_payload(ImageFormat::Png);
+        let pending = PendingInternalCopy {
+            payload: PendingInternalPayload::ImageHash(hash_for_payload(&payload).expect("hash")),
+            created_at: Instant::now(),
+        };
+
+        assert!(should_skip_internal_copy(
+            Some(&pending),
+            &payload,
             Instant::now(),
             Duration::from_secs(2)
         ));

@@ -16,7 +16,7 @@ export const App = (props: { store: ClipStore }) => {
                 <img alt="Klippy icon" class="h-8 w-8 rounded-md" src={klippyIcon} />
               </div>
               <div>
-                <p class="mt-0.5 text-[11px] text-slate-500">Clipboard archive for text, URLs, and code.</p>
+                <p class="mt-0.5 text-[11px] text-slate-500">Clipboard archive for text, URLs, code, and images.</p>
               </div>
             </div>
             <div class="flex items-center gap-2">

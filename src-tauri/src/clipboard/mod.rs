@@ -13,29 +13,48 @@ pub enum ClipboardError {
     Io(#[from] std::io::Error),
 }
 
-pub type ClipCallback = Arc<dyn Fn(String) + Send + Sync + 'static>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImagePayload {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardPayload {
+    Text(String),
+    Image(ImagePayload),
+}
+
+pub type ClipCallback = Arc<dyn Fn(ClipboardPayload) + Send + Sync + 'static>;
 
 pub trait ClipboardService: Send + Sync {
-    fn set_content(&self, content: &str) -> Result<(), ClipboardError>;
+    fn set_payload(&self, payload: &ClipboardPayload) -> Result<(), ClipboardError>;
     fn watch_changes(&self, callback: ClipCallback) -> Result<(), ClipboardError>;
     fn active_bundle_id(&self) -> Option<String>;
 }
 
 pub fn should_emit_change(
-    previous_content: &mut String,
-    next_content: &str,
+    previous_signature: &mut Option<String>,
+    next_signature: &str,
     last_emitted_at: &mut Instant,
     debounce: Duration,
 ) -> bool {
-    if next_content == previous_content {
+    if previous_signature
+        .as_deref()
+        .map(|previous| previous == next_signature)
+        .unwrap_or(false)
+    {
         return false;
     }
     if last_emitted_at.elapsed() < debounce {
-        *previous_content = next_content.to_string();
+        *previous_signature = Some(next_signature.to_string());
         return false;
     }
 
-    *previous_content = next_content.to_string();
+    *previous_signature = Some(next_signature.to_string());
     *last_emitted_at = Instant::now();
     true
 }
@@ -50,7 +69,7 @@ mod tests {
 
     #[test]
     fn debounce_blocks_rapid_changes() {
-        let mut previous = String::new();
+        let mut previous = None;
         let mut last = Instant::now();
         let debounce = Duration::from_secs(1);
 
@@ -60,11 +79,20 @@ mod tests {
 
     #[test]
     fn emits_after_debounce_window() {
-        let mut previous = String::new();
+        let mut previous = None;
         let mut last = Instant::now() - Duration::from_secs(2);
         let debounce = Duration::from_millis(100);
 
         let emitted = should_emit_change(&mut previous, "a", &mut last, debounce);
         assert!(emitted);
+    }
+
+    #[test]
+    fn identical_signature_is_not_emitted() {
+        let mut previous = Some("same".to_string());
+        let mut last = Instant::now() - Duration::from_secs(2);
+        let debounce = Duration::from_millis(10);
+        let emitted = should_emit_change(&mut previous, "same", &mut last, debounce);
+        assert!(!emitted);
     }
 }

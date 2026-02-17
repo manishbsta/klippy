@@ -19,7 +19,7 @@
         "height": 620,
         "resizable": true,
         "maximizable": false,
-        "minimizable": true,
+        "minimizable": false,
         "visible": false,
         "alwaysOnTop": false,
         "decorations": true
@@ -27,7 +27,15 @@
     ],
     "macOSPrivateApi": true,
     "security": {
-      "capabilities": ["default"]
+      "capabilities": ["default"],
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/**",
+          "$HOME/Library/Application Support/com.klippy.app/media/**"
+        ]
+      }
     }
   },
   "bundle": {

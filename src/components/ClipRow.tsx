@@ -1,4 +1,5 @@
-import { createSignal, onCleanup } from 'solid-js';
+import { createEffect, createSignal, onCleanup } from 'solid-js';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Clip } from '../lib/types';
 
 const formatTimestamp = (iso: string) =>
@@ -10,6 +11,9 @@ const formatTimestamp = (iso: string) =>
   });
 
 const contentClassByType = (type: Clip['contentType']) => {
+  if (type === 'image') {
+    return 'text-slate-700';
+  }
   if (type === 'url') {
     return 'break-all whitespace-pre-line text-sky-700 underline decoration-sky-300/70 underline-offset-2';
   }
@@ -18,6 +22,22 @@ const contentClassByType = (type: Clip['contentType']) => {
   }
   return 'break-words whitespace-pre-line text-slate-800';
 };
+
+const imageMetaText = (clip: Clip) => {
+  const parts: string[] = [];
+  if (clip.mimeType) {
+    parts.push(clip.mimeType.replace('image/', '').toUpperCase());
+  }
+  if (clip.pixelWidth && clip.pixelHeight) {
+    parts.push(`${clip.pixelWidth}x${clip.pixelHeight}`);
+  }
+  if (typeof clip.byteSize === 'number' && clip.byteSize > 0) {
+    parts.push(`${(clip.byteSize / (1024 * 1024)).toFixed(1)} MB`);
+  }
+  return parts.join(' | ');
+};
+
+const mediaSrc = (path?: string | null) => (path ? convertFileSrc(path) : null);
 
 export const ClipRow = (props: {
   clip: Clip;
@@ -28,7 +48,26 @@ export const ClipRow = (props: {
   onDelete: () => Promise<void> | void;
 }) => {
   const [copied, setCopied] = createSignal(false);
+  const [imageFallbackStep, setImageFallbackStep] = createSignal(0);
+  const hasThumb = () => Boolean(props.clip.thumbPath);
+  const hasOriginal = () => Boolean(props.clip.mediaPath);
+  const previewSrc = () => {
+    const thumb = mediaSrc(props.clip.thumbPath);
+    const original = mediaSrc(props.clip.mediaPath);
+    if (imageFallbackStep() === 0) {
+      return thumb ?? original;
+    }
+    if (imageFallbackStep() === 1) {
+      return original;
+    }
+    return null;
+  };
   let copiedTimer: number | undefined;
+
+  createEffect(() => {
+    props.clip.id;
+    setImageFallbackStep(0);
+  });
 
   onCleanup(() => {
     if (copiedTimer !== undefined) {
@@ -84,12 +123,45 @@ export const ClipRow = (props: {
       </div>
 
       <div class="h-full pb-0 pt-4">
-        <p
-          data-testid={`clip-content-${props.clip.id}`}
-          class={`clip-two-lines block w-full pr-8 text-left text-[12px] leading-[1.25] transition-colors hover:text-black ${contentClassByType(props.clip.contentType)}`}
-        >
-          {props.clip.content}
-        </p>
+        {props.clip.contentType === 'image' ? (
+          <div class="flex h-full items-center gap-2 pr-8">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-100">
+              {previewSrc() ? (
+                <img
+                  alt="Clipboard image preview"
+                  class="h-full w-full object-cover"
+                  src={previewSrc()!}
+                  onError={() => {
+                    const step = imageFallbackStep();
+                    if (step === 0 && hasThumb() && hasOriginal()) {
+                      setImageFallbackStep(1);
+                      return;
+                    }
+                    setImageFallbackStep(2);
+                  }}
+                />
+              ) : (
+                <span class="font-mono text-[9px] uppercase text-slate-500">IMG</span>
+              )}
+            </div>
+            <div class="min-w-0">
+              <p
+                data-testid={`clip-content-${props.clip.id}`}
+                class="clip-two-lines block w-full text-left font-medium text-[11px] leading-[1.2] text-slate-800"
+              >
+                {props.clip.content}
+              </p>
+              <p class="truncate text-[9px] text-slate-500">{imageMetaText(props.clip)}</p>
+            </div>
+          </div>
+        ) : (
+          <p
+            data-testid={`clip-content-${props.clip.id}`}
+            class={`clip-two-lines block w-full pr-8 text-left text-[12px] leading-[1.25] transition-colors hover:text-black ${contentClassByType(props.clip.contentType)}`}
+          >
+            {props.clip.content}
+          </p>
+        )}
       </div>
 
       <div class="absolute right-1 top-1/2 flex -translate-y-1/2 flex-col items-center gap-0.5">

@@ -2,14 +2,16 @@
 
 Klippy is a macOS-first clipboard manager built with Tauri v2, Rust, SolidJS, Vite, Tailwind, and Bun.
 
-It watches clipboard text changes, stores them locally, and gives you a fast searchable UI with pin/copy/delete actions.
+It watches clipboard changes, stores them locally, and gives you a fast searchable UI with pin/copy/delete actions.
 
 ## Features
 
-- Clipboard history for `text`, `url`, and `code` clips.
+- Clipboard history for `text`, `url`, `code`, and `image` clips.
 - Global shortcut `Cmd + Shift + V` to show/hide the app window.
 - Tray icon click toggles the app window.
 - Full-card click to copy a clip back to clipboard.
+- Image clips are shown with compact thumbnails and metadata.
+- Supported image clipboard formats: `PNG`, `JPEG`, `TIFF`, `WEBP`.
 - Debounced search with keyboard selection (`↑` / `↓`).
 - Pin/unpin clips.
 - Delete single clip or `Clear All`.
@@ -25,7 +27,7 @@ It watches clipboard text changes, stores them locally, and gives you a fast sea
 - No cloud sync.
 - No clipboard content logging.
 - Default denylist for known password manager app bundle IDs.
-- Max stored clip payload: `256 KB`.
+- Max stored clip payload: `10 MB` per clip.
 - Default history limit: `200` clips.
 
 ## Tech Stack

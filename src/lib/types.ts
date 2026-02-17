@@ -1,4 +1,4 @@
-export type ContentType = 'text' | 'url' | 'code';
+export type ContentType = 'text' | 'url' | 'code' | 'image';
 
 export interface Clip {
   id: number;
@@ -6,6 +6,12 @@ export interface Clip {
   contentType: ContentType;
   pinned: boolean;
   createdAt: string;
+  mediaPath?: string | null;
+  thumbPath?: string | null;
+  mimeType?: string | null;
+  byteSize?: number;
+  pixelWidth?: number | null;
+  pixelHeight?: number | null;
 }
 
 export interface ClipPage {

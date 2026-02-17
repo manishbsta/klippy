@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use commands::AppState;
 use services::clip_engine::ClipEngine;
+use services::media_store::MediaStore;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -70,8 +71,8 @@ fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     let is_visible: bool = window.is_visible().unwrap_or_default();
     let is_minimized: bool = window.is_minimized().unwrap_or_default();
 
-    if should_minimize_on_focus_loss(is_visible, is_minimized) {
-        let _ = window.minimize();
+    if should_hide_on_focus_loss(is_visible, is_minimized) {
+        let _ = window.hide();
         return;
     }
 
@@ -83,7 +84,7 @@ fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     let _ = window.set_focus();
 }
 
-fn should_minimize_on_focus_loss(is_visible: bool, is_minimized: bool) -> bool {
+fn should_hide_on_focus_loss(is_visible: bool, is_minimized: bool) -> bool {
     is_visible && !is_minimized
 }
 
@@ -113,11 +114,12 @@ pub fn run() {
         )
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Regular);
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             app.manage(WindowPlacementState::default());
 
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_minimizable(false);
                 let monitor = window
                     .current_monitor()
                     .ok()
@@ -162,12 +164,30 @@ pub fn run() {
 
             let db_path = app_data_dir.join("klippy.sqlite3");
             let db = Arc::new(db::Database::new(&db_path).map_err(|err| err.to_string())?);
+            let media_store = Arc::new(
+                MediaStore::new(&app_data_dir.join("media")).map_err(|err| err.to_string())?,
+            );
+            let referenced = db.referenced_media_paths().map_err(|err| err.to_string())?;
+            media_store
+                .cleanup_orphans(&referenced)
+                .map_err(|err| err.to_string())?;
             let clipboard = clipboard::default_service();
-            let engine = Arc::new(ClipEngine::new(db.clone(), clipboard, app.handle().clone()));
+            let engine = Arc::new(ClipEngine::new(
+                db.clone(),
+                clipboard,
+                media_store,
+                app.handle().clone(),
+            ));
             engine.start().map_err(|err| err.to_string())?;
 
             let settings = db.get_settings().map_err(|err| err.to_string())?;
-            let _ = db.prune_excess(settings.history_limit);
+            let pruned = db.prune_excess(settings.history_limit).map_err(|err| err.to_string())?;
+            engine
+                .cleanup_media_for_clips(&pruned)
+                .map_err(|err| err.to_string())?;
+            if let Err(err) = engine.reconcile_recent_image_duplicates(500) {
+                warn!("failed to reconcile image duplicates: {err}");
+            }
 
             let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);
             app.global_shortcut()
@@ -208,13 +228,13 @@ pub fn run() {
         .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                let _ = window.minimize();
+                let _ = window.hide();
             }
             WindowEvent::Focused(false) => {
                 let is_visible: bool = window.is_visible().unwrap_or_default();
                 let is_minimized: bool = window.is_minimized().unwrap_or_default();
-                if should_minimize_on_focus_loss(is_visible, is_minimized) {
-                    let _ = window.minimize();
+                if should_hide_on_focus_loss(is_visible, is_minimized) {
+                    let _ = window.hide();
                 }
             }
             WindowEvent::Moved(_) => {
@@ -272,13 +292,13 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::should_minimize_on_focus_loss;
+    use super::should_hide_on_focus_loss;
 
     #[test]
-    fn minimizes_only_when_window_is_visible_and_not_minimized() {
-        assert!(should_minimize_on_focus_loss(true, false));
-        assert!(!should_minimize_on_focus_loss(false, false));
-        assert!(!should_minimize_on_focus_loss(true, true));
-        assert!(!should_minimize_on_focus_loss(false, true));
+    fn hides_only_when_window_is_visible_and_not_minimized() {
+        assert!(should_hide_on_focus_loss(true, false));
+        assert!(!should_hide_on_focus_loss(false, false));
+        assert!(!should_hide_on_focus_loss(true, true));
+        assert!(!should_hide_on_focus_loss(false, true));
     }
 }

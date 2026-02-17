@@ -5,6 +5,6 @@ import { EmptyState } from './EmptyState';
 describe('EmptyState', () => {
   it('shows guidance text', () => {
     render(() => <EmptyState />);
-    expect(screen.getByText(/Copy text, URLs, or code/i)).toBeInTheDocument();
+    expect(screen.getByText(/Copy text, URLs, code, or images/i)).toBeInTheDocument();
   });
 });

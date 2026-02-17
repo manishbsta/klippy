@@ -63,12 +63,16 @@ pub fn delete_clip(app: AppHandle, state: State<'_, AppState>, id: i64) -> Resul
         .delete_clip(id)
         .map_err(|err| err.to_string())?;
 
-    if !deleted {
-        return Err("clip not found".to_string());
+    if let Some(clip) = deleted {
+        state
+            .engine
+            .cleanup_clip_media(&clip)
+            .map_err(|err| err.to_string())?;
+        let _ = app.emit("clips://deleted", DeletedPayload { id });
+        Ok(())
+    } else {
+        Err("clip not found".to_string())
     }
-
-    let _ = app.emit("clips://deleted", DeletedPayload { id });
-    Ok(())
 }
 
 #[tauri::command]
@@ -78,8 +82,12 @@ pub fn clear_all_clips(app: AppHandle, state: State<'_, AppState>) -> Result<usi
         .db()
         .delete_all_clips()
         .map_err(|err| err.to_string())?;
+    state
+        .engine
+        .cleanup_media_for_clips(&deleted)
+        .map_err(|err| err.to_string())?;
     let _ = app.emit("clips://updated", true);
-    Ok(deleted)
+    Ok(deleted.len())
 }
 
 #[tauri::command]
