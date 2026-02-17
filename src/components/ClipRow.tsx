@@ -93,7 +93,7 @@ export const ClipRow = (props: {
   return (
     <article
       data-testid={`clip-row-${props.clip.id}`}
-      class={`group relative h-[74px] cursor-pointer overflow-hidden rounded-md border px-2 py-1.5 transition-colors duration-150 ${
+      class={`group relative h-[74px] shrink-0 cursor-pointer overflow-hidden rounded-md border px-2 py-1.5 transition-colors duration-150 ${
         props.selected
           ? 'border-emerald-500/60 bg-white shadow-[0_4px_12px_rgba(15,23,42,0.08)]'
           : 'border-slate-300/80 bg-white hover:border-slate-400'
@@ -122,9 +122,9 @@ export const ClipRow = (props: {
         </span>
       </div>
 
-      <div class="h-full pb-0 pt-4">
+      <div class="pr-8 pt-5">
         {props.clip.contentType === 'image' ? (
-          <div class="flex h-full items-center gap-2 pr-8">
+          <div class="flex items-center gap-2">
             <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-100">
               {previewSrc() ? (
                 <img
@@ -159,7 +159,7 @@ export const ClipRow = (props: {
         ) : (
           <p
             data-testid={`clip-content-${props.clip.id}`}
-            class={`clip-two-lines block w-full pr-8 text-left text-[12px] leading-[1.25] transition-colors hover:text-black ${contentClassByType(props.clip.contentType)}`}
+            class={`clip-two-lines block w-full text-left text-[12px] leading-[1.25] transition-colors hover:text-black ${contentClassByType(props.clip.contentType)}`}
           >
             {props.clip.content}
           </p>
