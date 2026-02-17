@@ -185,8 +185,17 @@ pub fn run() {
             engine
                 .cleanup_media_for_clips(&pruned)
                 .map_err(|err| err.to_string())?;
-            if let Err(err) = engine.reconcile_recent_image_duplicates(500) {
-                warn!("failed to reconcile image duplicates: {err}");
+            let image_reconcile_marker = app_data_dir.join(".image-reconcile-v1.done");
+            if !image_reconcile_marker.exists() {
+                match engine.reconcile_recent_image_duplicates(500) {
+                    Ok(count) => {
+                        if let Err(err) = std::fs::write(&image_reconcile_marker, count.to_string())
+                        {
+                            warn!("failed to persist image reconciliation marker: {err}");
+                        }
+                    }
+                    Err(err) => warn!("failed to reconcile image duplicates: {err}"),
+                }
             }
 
             let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV);

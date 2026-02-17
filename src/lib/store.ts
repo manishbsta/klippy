@@ -9,7 +9,7 @@ import {
 } from './api';
 import type { Clip } from './types';
 
-const PAGE_SIZE = 60;
+const PAGE_SIZE = 40;
 
 export interface ClipStore {
   items: () => Clip[];

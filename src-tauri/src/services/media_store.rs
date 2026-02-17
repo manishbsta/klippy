@@ -49,7 +49,7 @@ impl MediaStore {
         if !thumb_path.exists() {
             let decoded = image::load_from_memory(&payload.bytes)
                 .map_err(|err| AppError::Internal(format!("failed to decode image: {err}")))?;
-            let thumbnail = decoded.thumbnail(96, 96);
+            let thumbnail = decoded.thumbnail(72, 72);
             let mut output = Cursor::new(Vec::new());
             thumbnail
                 .write_to(&mut output, ImageFormat::Png)

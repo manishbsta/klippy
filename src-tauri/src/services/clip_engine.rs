@@ -10,7 +10,7 @@ use crate::db::{Clip, Database, ImageClipInsert, LatestClip};
 use crate::error::{AppError, AppResult};
 use crate::services::media_store::{MediaStore, StoredImage};
 use crate::services::prune::run_prune;
-use crate::utils::hash::sha256_hex;
+use crate::utils::hash::{sha256_hex, sha256_hex_bytes};
 
 const INTERNAL_COPY_SUPPRESS_WINDOW: Duration = Duration::from_millis(1500);
 
@@ -308,8 +308,16 @@ pub fn classify_content_type(content: &str) -> &'static str {
 fn hash_for_payload(payload: &ClipboardPayload) -> AppResult<String> {
     match payload {
         ClipboardPayload::Text(content) => Ok(sha256_hex(content)),
-        ClipboardPayload::Image(image) => MediaStore::canonical_hash_for_image_bytes(&image.bytes),
+        ClipboardPayload::Image(image) => canonical_hash_for_image_payload(image),
     }
+}
+
+fn canonical_hash_for_image_payload(image: &ImagePayload) -> AppResult<String> {
+    // Most runtime payloads are already canonical PNG from the clipboard layer.
+    if image.mime.eq_ignore_ascii_case("image/png") && image.format.eq_ignore_ascii_case("png") {
+        return Ok(sha256_hex_bytes(&image.bytes));
+    }
+    MediaStore::canonical_hash_for_image_bytes(&image.bytes)
 }
 
 fn should_skip_internal_copy(
@@ -330,7 +338,7 @@ fn should_skip_internal_copy(
                 (
                     PendingInternalPayload::ImageHash(existing_hash),
                     ClipboardPayload::Image(incoming),
-                ) => MediaStore::canonical_hash_for_image_bytes(&incoming.bytes)
+                ) => canonical_hash_for_image_payload(incoming)
                     .map(|incoming_hash| existing_hash == &incoming_hash)
                     .unwrap_or(false),
                 _ => false,
@@ -384,10 +392,15 @@ mod tests {
         DynamicImage::ImageRgba8(rgba)
             .write_to(&mut output, format)
             .expect("encode");
+        let (mime, format_label) = match format {
+            ImageFormat::Tiff => ("image/tiff", "tiff"),
+            ImageFormat::Png => ("image/png", "png"),
+            _ => ("image/png", "png"),
+        };
         ClipboardPayload::Image(ImagePayload {
             bytes: output.into_inner(),
-            mime: "image/png".to_string(),
-            format: "png".to_string(),
+            mime: mime.to_string(),
+            format: format_label.to_string(),
             width: 2,
             height: 1,
         })
@@ -457,12 +470,16 @@ mod tests {
     }
 
     #[test]
-    fn canonical_image_hash_is_format_independent() {
-        let png_payload = encoded_image_payload(ImageFormat::Png);
+    fn canonical_image_hash_supports_non_png_formats() {
         let tiff_payload = encoded_image_payload(ImageFormat::Tiff);
-        let png_hash = hash_for_payload(&png_payload).expect("png hash");
-        let tiff_hash = hash_for_payload(&tiff_payload).expect("tiff hash");
-        assert_eq!(png_hash, tiff_hash);
+        let actual = hash_for_payload(&tiff_payload).expect("tiff hash");
+        let expected = match tiff_payload {
+            ClipboardPayload::Image(image) => {
+                MediaStore::canonical_hash_for_image_bytes(&image.bytes).expect("canonical hash")
+            }
+            ClipboardPayload::Text(_) => unreachable!("expected image payload"),
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]

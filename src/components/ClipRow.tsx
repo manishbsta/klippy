@@ -130,6 +130,8 @@ export const ClipRow = (props: {
                 <img
                   alt="Clipboard image preview"
                   class="h-full w-full object-cover"
+                  decoding="async"
+                  loading="lazy"
                   src={previewSrc()!}
                   onError={() => {
                     const step = imageFallbackStep();
