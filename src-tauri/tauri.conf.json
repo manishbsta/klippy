@@ -15,7 +15,7 @@
       {
         "label": "main",
         "title": "Klippy",
-        "width": 600,
+        "width": 560,
         "height": 620,
         "resizable": true,
         "maximizable": false,

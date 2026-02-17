@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 use tracing::error;
@@ -9,15 +10,29 @@ use crate::error::{AppError, AppResult};
 use crate::services::prune::run_prune;
 use crate::utils::hash::sha256_hex;
 
+const INTERNAL_COPY_SUPPRESS_WINDOW: Duration = Duration::from_millis(1500);
+
+#[derive(Debug, Clone)]
+struct PendingInternalCopy {
+    content: String,
+    created_at: Instant,
+}
+
 pub struct ClipEngine {
     db: Arc<Database>,
     clipboard: Arc<dyn ClipboardService>,
     app: AppHandle,
+    pending_internal_copy: Mutex<Option<PendingInternalCopy>>,
 }
 
 impl ClipEngine {
     pub fn new(db: Arc<Database>, clipboard: Arc<dyn ClipboardService>, app: AppHandle) -> Self {
-        Self { db, clipboard, app }
+        Self {
+            db,
+            clipboard,
+            app,
+            pending_internal_copy: Mutex::new(None),
+        }
     }
 
     pub fn start(self: &Arc<Self>) -> AppResult<()> {
@@ -33,6 +48,10 @@ impl ClipEngine {
     pub fn process_clip(&self, content: String) -> AppResult<Option<Clip>> {
         let settings = self.db.get_settings()?;
         if should_skip_content(&content, settings.max_clip_bytes) {
+            return Ok(None);
+        }
+
+        if self.should_skip_pending_internal_copy(&content)? {
             return Ok(None);
         }
 
@@ -60,11 +79,47 @@ impl ClipEngine {
     pub fn copy_clip(&self, id: i64) -> AppResult<()> {
         let clip = self.db.get_clip(id)?.ok_or(AppError::NotFound)?;
         self.clipboard.set_content(&clip.content)?;
+        let mut pending = self
+            .pending_internal_copy
+            .lock()
+            .map_err(|_| AppError::Internal("pending copy lock poisoned".to_string()))?;
+        *pending = Some(PendingInternalCopy {
+            content: clip.content,
+            created_at: Instant::now(),
+        });
         Ok(())
     }
 
     pub fn db(&self) -> &Arc<Database> {
         &self.db
+    }
+
+    fn should_skip_pending_internal_copy(&self, content: &str) -> AppResult<bool> {
+        let mut pending = self
+            .pending_internal_copy
+            .lock()
+            .map_err(|_| AppError::Internal("pending copy lock poisoned".to_string()))?;
+        let now = Instant::now();
+
+        if should_skip_internal_copy(
+            pending.as_ref(),
+            content,
+            now,
+            INTERNAL_COPY_SUPPRESS_WINDOW,
+        ) {
+            *pending = None;
+            return Ok(true);
+        }
+
+        if pending
+            .as_ref()
+            .map(|entry| now.duration_since(entry.created_at) > INTERNAL_COPY_SUPPRESS_WINDOW)
+            .unwrap_or(false)
+        {
+            *pending = None;
+        }
+
+        Ok(false)
     }
 }
 
@@ -79,6 +134,20 @@ pub fn should_ignore_bundle(bundle_id: &str, app_bundle_id: &str, denylist: &[St
 pub fn is_duplicate(latest: Option<&LatestClip>, content: &str, hash: &str) -> bool {
     latest
         .map(|entry| entry.content == content && entry.hash == hash)
+        .unwrap_or(false)
+}
+
+fn should_skip_internal_copy(
+    pending: Option<&PendingInternalCopy>,
+    incoming_content: &str,
+    now: Instant,
+    suppress_window: Duration,
+) -> bool {
+    pending
+        .map(|entry| {
+            now.duration_since(entry.created_at) <= suppress_window
+                && entry.content == incoming_content
+        })
         .unwrap_or(false)
 }
 
@@ -153,6 +222,51 @@ mod tests {
             "com.apple.Terminal",
             "com.klippy.app",
             &denylist
+        ));
+    }
+
+    #[test]
+    fn skips_pending_internal_copy_within_suppress_window() {
+        let pending = PendingInternalCopy {
+            content: "copy me".to_string(),
+            created_at: Instant::now(),
+        };
+
+        assert!(should_skip_internal_copy(
+            Some(&pending),
+            "copy me",
+            Instant::now(),
+            Duration::from_secs(2)
+        ));
+    }
+
+    #[test]
+    fn does_not_skip_pending_internal_copy_if_content_differs() {
+        let pending = PendingInternalCopy {
+            content: "copy me".to_string(),
+            created_at: Instant::now(),
+        };
+
+        assert!(!should_skip_internal_copy(
+            Some(&pending),
+            "different",
+            Instant::now(),
+            Duration::from_secs(2)
+        ));
+    }
+
+    #[test]
+    fn does_not_skip_pending_internal_copy_after_window_expires() {
+        let pending = PendingInternalCopy {
+            content: "copy me".to_string(),
+            created_at: Instant::now() - Duration::from_secs(3),
+        };
+
+        assert!(!should_skip_internal_copy(
+            Some(&pending),
+            "copy me",
+            Instant::now(),
+            Duration::from_secs(2)
         ));
     }
 }

@@ -5,8 +5,8 @@ mod error;
 mod services;
 mod utils;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use commands::AppState;
 use services::clip_engine::ClipEngine;
@@ -16,10 +16,12 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use tracing::level_filters::LevelFilter;
 use tracing::warn;
 
+const FIXED_WINDOW_WIDTH: f64 = 560.0;
+
 #[derive(Default)]
 struct WindowPlacementState {
-    user_has_moved: AtomicBool,
     suppress_next_move_event: AtomicBool,
+    suppress_next_resize_event: AtomicBool,
 }
 
 fn place_window_top_right(window: &WebviewWindow, placement: &WindowPlacementState) {
@@ -52,6 +54,18 @@ fn place_window_top_right(window: &WebviewWindow, placement: &WindowPlacementSta
     let _ = window.set_position(LogicalPosition::new(x, y));
 }
 
+fn set_window_size(
+    window: &WebviewWindow,
+    placement: &WindowPlacementState,
+    width: f64,
+    height: f64,
+) {
+    placement
+        .suppress_next_resize_event
+        .store(true, Ordering::SeqCst);
+    let _ = window.set_size(LogicalSize::new(width, height));
+}
+
 fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     let is_visible: bool = window.is_visible().unwrap_or_default();
     let is_minimized: bool = window.is_minimized().unwrap_or_default();
@@ -62,9 +76,7 @@ fn toggle_window(app: &AppHandle, window: &WebviewWindow) {
     }
 
     let placement = app.state::<WindowPlacementState>();
-    if !placement.user_has_moved.load(Ordering::SeqCst) {
-        place_window_top_right(window, placement.inner());
-    }
+    place_window_top_right(window, placement.inner());
 
     let _ = window.unminimize();
     let _ = window.show();
@@ -113,19 +125,26 @@ pub fn run() {
                     .or_else(|| window.primary_monitor().ok().flatten());
                 if let Some(monitor) = monitor {
                     let scale = window.scale_factor().unwrap_or(1.0);
-                    let monitor_width = (monitor.size().width as f64 / scale).max(1.0);
                     let monitor_height = (monitor.size().height as f64 / scale).max(1.0);
-                    let min_width = (monitor_width * 0.30).round().clamp(520.0, 620.0);
                     let min_height = (monitor_height * 0.80).round();
-                    let _ = window.set_min_size(Some(LogicalSize::new(min_width, min_height)));
+                    let _ =
+                        window.set_min_size(Some(LogicalSize::new(FIXED_WINDOW_WIDTH, min_height)));
+                    let _ = window
+                        .set_max_size(Some(LogicalSize::new(FIXED_WINDOW_WIDTH, monitor_height)));
 
                     if let Ok(inner_size) = window.inner_size() {
-                        let current_width = inner_size.width as f64 / scale;
                         let current_height = inner_size.height as f64 / scale;
-                        if current_width < min_width || current_height < min_height {
-                            let next_width = current_width.max(min_width);
-                            let next_height = current_height.max(min_height);
-                            let _ = window.set_size(LogicalSize::new(next_width, next_height));
+                        let next_height = current_height.max(min_height);
+                        if current_height < min_height
+                            || (inner_size.width as f64 / scale - FIXED_WINDOW_WIDTH).abs() > 0.5
+                        {
+                            let placement = app.state::<WindowPlacementState>();
+                            set_window_size(
+                                &window,
+                                placement.inner(),
+                                FIXED_WINDOW_WIDTH,
+                                next_height,
+                            );
                         }
                     }
                 }
@@ -186,31 +205,56 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            match event {
-                WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                let _ = window.minimize();
+            }
+            WindowEvent::Focused(false) => {
+                let is_visible: bool = window.is_visible().unwrap_or_default();
+                let is_minimized: bool = window.is_minimized().unwrap_or_default();
+                if should_minimize_on_focus_loss(is_visible, is_minimized) {
                     let _ = window.minimize();
                 }
-                WindowEvent::Focused(false) => {
-                    let is_visible: bool = window.is_visible().unwrap_or_default();
-                    let is_minimized: bool = window.is_minimized().unwrap_or_default();
-                    if should_minimize_on_focus_loss(is_visible, is_minimized) {
-                        let _ = window.minimize();
-                    }
-                }
-                WindowEvent::Moved(_) => {
-                    let placement = window.app_handle().state::<WindowPlacementState>();
-                    if placement
-                        .suppress_next_move_event
-                        .swap(false, Ordering::SeqCst)
-                    {
-                        return;
-                    }
-                    placement.user_has_moved.store(true, Ordering::SeqCst);
-                }
-                _ => {}
             }
+            WindowEvent::Moved(_) => {
+                let app_handle = window.app_handle();
+                let placement = app_handle.state::<WindowPlacementState>();
+                if placement
+                    .suppress_next_move_event
+                    .swap(false, Ordering::SeqCst)
+                {
+                    return;
+                }
+                if let Some(main_window) = app_handle.get_webview_window(window.label()) {
+                    place_window_top_right(&main_window, placement.inner());
+                }
+            }
+            WindowEvent::Resized(size) => {
+                let app_handle = window.app_handle();
+                let placement = app_handle.state::<WindowPlacementState>();
+                if placement
+                    .suppress_next_resize_event
+                    .swap(false, Ordering::SeqCst)
+                {
+                    return;
+                }
+
+                let scale = window.scale_factor().unwrap_or(1.0);
+                let current_width = size.width as f64 / scale;
+                if (current_width - FIXED_WINDOW_WIDTH).abs() > 0.5 {
+                    let current_height = size.height as f64 / scale;
+                    if let Some(main_window) = app_handle.get_webview_window(window.label()) {
+                        set_window_size(
+                            &main_window,
+                            placement.inner(),
+                            FIXED_WINDOW_WIDTH,
+                            current_height,
+                        );
+                    }
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_clips,
