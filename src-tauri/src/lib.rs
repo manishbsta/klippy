@@ -185,7 +185,7 @@ pub fn run() {
             engine
                 .cleanup_media_for_clips(&pruned)
                 .map_err(|err| err.to_string())?;
-            let image_reconcile_marker = app_data_dir.join(".image-reconcile-v1.done");
+            let image_reconcile_marker = app_data_dir.join(".image-reconcile-v2.done");
             if !image_reconcile_marker.exists() {
                 match engine.reconcile_recent_image_duplicates(500) {
                     Ok(count) => {

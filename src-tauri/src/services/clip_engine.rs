@@ -10,7 +10,7 @@ use crate::db::{Clip, Database, ImageClipInsert, LatestClip};
 use crate::error::{AppError, AppResult};
 use crate::services::media_store::{MediaStore, StoredImage};
 use crate::services::prune::run_prune;
-use crate::utils::hash::{sha256_hex, sha256_hex_bytes};
+use crate::utils::hash::sha256_hex;
 
 const INTERNAL_COPY_SUPPRESS_WINDOW: Duration = Duration::from_millis(1500);
 
@@ -313,10 +313,6 @@ fn hash_for_payload(payload: &ClipboardPayload) -> AppResult<String> {
 }
 
 fn canonical_hash_for_image_payload(image: &ImagePayload) -> AppResult<String> {
-    // Most runtime payloads are already canonical PNG from the clipboard layer.
-    if image.mime.eq_ignore_ascii_case("image/png") && image.format.eq_ignore_ascii_case("png") {
-        return Ok(sha256_hex_bytes(&image.bytes));
-    }
     MediaStore::canonical_hash_for_image_bytes(&image.bytes)
 }
 
@@ -558,6 +554,25 @@ mod tests {
         assert!(should_skip_internal_copy(
             Some(&pending),
             &payload,
+            Instant::now(),
+            Duration::from_secs(2)
+        ));
+    }
+
+    #[test]
+    fn image_pending_copy_matches_across_formats_for_same_pixels() {
+        let stored_payload = encoded_image_payload(ImageFormat::Tiff);
+        let incoming_payload = encoded_image_payload(ImageFormat::Png);
+        let pending = PendingInternalCopy {
+            payload: PendingInternalPayload::ImageHash(
+                hash_for_payload(&stored_payload).expect("stored hash"),
+            ),
+            created_at: Instant::now(),
+        };
+
+        assert!(should_skip_internal_copy(
+            Some(&pending),
+            &incoming_payload,
             Instant::now(),
             Duration::from_secs(2)
         ));
